@@ -1,0 +1,573 @@
+---
+description: "Clean Swift (VIP) architecture rule for SwiftUI modules with Swift 6 strict concurrency. Apply when creating, refactoring, or reviewing module files following the VIP pattern: Controller, View, Interactor, Presenter, Router, Store, Factory, and Models."
+globs:
+  - "**/*Controller.swift"
+  - "**/*Interactor.swift"
+  - "**/*Presenter.swift"
+  - "**/*Router.swift"
+  - "**/*Store.swift"
+  - "**/*Factory.swift"
+  - "**/*Models.swift"
+  - "**/*Model.swift"
+  - "**/*View.swift"
+---
+
+# Clean Swift (Swift 6 Concurrency) — Module Architecture Rule SwiftUI
+
+Это правило определяет обязательную структуру экрана при использовании Clean Swift (VIP) и SwiftUI:
+- Swift 6 strict concurrency
+- async/await
+- Actor-based DataStore
+- Полной типизацией состояний
+
+Применяется ко всем новым SwiftUI-экранам и при рефакторинге уже созданных
+
+# 1. Обязательная структура файлов
+
+Каждый экран должен иметь следующую структуру:
+
+Вариант 1:
+
+```
+Template
+ ├── TemplateController.swift
+ ├── TemplateView.swift
+ ├── TemplateInteractor.swift
+ ├── TemplatePresenter.swift
+ ├── TemplateRouter.swift
+ ├── TemplateModels.swift
+ ├── TemplateStore.swift
+ └── TemplateFactory.swift
+ ```
+
+ Вариант 2:
+
+ ```
+Template
+ ├── Controller
+     ├── TemplateController.swift
+├── View
+     ├── TemplateView.swift
+ ├── Interactor
+     ├── TemplateInteractor.swift
+ ├── Presenter
+     ├── TemplatePresenter.swift
+ ├── Router
+     ├── TemplateRouter.swift
+ ├── Models
+     ├── TemplateModels.swift
+ ├── Store
+     ├── TemplateStore.swift
+ ├── Factory
+     └── TemplateFactory.swift
+ ```
+
+❗ Запрещено объединять Interactor/Presenter/Router в один файл.  
+❗ SwiftUI View не заменяет Controller.
+
+# 2. Naming Convention (строго обязательно)
+
+## 2.1 Название экрана
+
+- Название экрана = Feature
+- Все файлы и типы должны начинаться с одного и того же префикса.
+
+Пример:
+
+```swift
+ProfileController
+ProfileView
+ProfileInteractor
+ProfilePresenter
+ProfileRouter
+ProfileModel
+ProfileStore
+ProfileFactory
+```
+
+## 2.2 Protocol Naming
+
+| Слой  | Протокол |
+|-------|-----|
+| Controller | FeatureDisplayLogic |
+| Interactor | FeatureBusinessLogic |
+| Presenter | FeaturePresentationLogic |
+| Router | FeatureRoutingLogic |
+| Store | FeatureDataStore |
+
+❗ Суффиксы обязательны.  
+❗ Использование generic названий (DisplayLogic, InteractorLogic) запрещено.
+
+## 2.3 Models Naming
+
+Модели экрана должны быть вложены в:
+
+```swift
+enum FeatureModel {}
+```
+
+И содержать строго:
+
+```swift
+enum Request {}
+enum Response {}
+enum ViewModel {}
+enum Route {}
+enum Action {}
+```
+
+Запрещено:  
+- Создавать внешние модели вне FeatureModel
+- Использовать suffix Model вне enum
+
+Правила для формирования имени кейса:
+- cases внутри Request должны отражать суть запроса, например в interactor есть загрузка пользователя (метод fetchUser), значит case будет fetchUser (если название функции длинное, но для кейса можно сократить - сокращаем)
+- cases внутри ViewModel должны отражать что мы рисуем, например если происходит конфигурация кнопки, case будет configureButton(ViewModel)
+- cases внутри route должен отражать куда происходит навигация
+- cases внутри response на что реагируем
+- cases внутри action как правило используется для конфигурации нажатий внутри presenter и проксирует методы в interactor, имя должно отражать действие (refresh, pay и тд)
+
+Пример:
+
+```swift
+enum AuthModel {
+
+    enum Request {
+        // юзер вводит номера телефона, внутри происходит валидация
+        case enterPhone(String)
+    }
+
+    enum Response {
+        // вызывается по результату валидации номера
+        case sendSmsButtonEnable(Bool)
+    }
+
+    enum ViewModel {
+        // установка состояния кнопки
+        case smsButton(MMButton.State)
+    }
+
+    enum Route {
+        // переход на подтверждение номера по смс
+        case enterSms
+    }
+
+    enum Action {
+        // действие для кнопки
+        case requestSms
+    }
+
+}
+```
+
+# 3. Controller Rule (UIHostingController)
+
+Контроллер который ловит события от пользователя и приложения, наследуется от UIHostingController<FeatureView>
+
+## 3.1 Protocol
+
+```swift
+protocol FeatureDisplayLogic: AnyObject {
+    @MainActor func requestRoute(_ route: FeatureModel.Route) async
+    @MainActor func displayContent(_ viewModel: FeatureModel.ViewModel)
+    func perfromAction(_ action: FeatureModel.Action) async
+}
+```
+
+Lint Requirements:
+- Все UI-методы = @MainActor
+- Routing метод = async
+- Контроллер не содержит бизнес-логики
+- Контроллер не содержит state
+- SwiftUI View не выполняет routing
+
+## 3.2 Controller Implementation Requirements
+
+```swift
+final class FeatureController: UIHostingController<FeatureView> {
+
+    var router: FeatureRoutingLogic?
+    var interactor: FeatureBusinessLogic?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        Task {
+            await interactor?.makeState(request: .start)
+        }
+    }
+}
+```
+
+## 3.3 Extension
+
+```swift
+extension FeatureController: FeatureDisplayLogic {
+
+    func displayContent(_ viewModel: FeatureModel.ViewModel) {
+        switch viewModel {
+        case .display(let viewModel):
+            // обновление sui view
+            self.rootView.data.viewModel = viewModel
+        }
+    }
+
+    func requestRoute(_ route: FeatureModel.Route) async {
+        switch route {
+        case .route:
+            // навигация
+            await router?.route(to: .route)
+        }
+    }
+
+    func perfromAction(_ action: FeatureModel.Action) async {
+        switch action {
+        case .action:
+            /// вызов действий, обычно проксируется в interactor
+            break
+        }
+    }
+}
+```
+
+❗ Контроллер не делает push/present напрямую  
+❗ Routing всегда через router  
+❗ Routing всегда async  
+❗ Запрещено вызывать presenter напрямую  
+❗ Запрещено обращаться к dataStore  
+
+# 4. SwiftUI View Rule
+
+Как описывать и использовать данные для View
+
+## 4.1 Observable Data
+
+Данные разделяются по флагу компиляции для превью
+
+```swift
+final class FeatureData: ObservableObject {
+
+    #if RELEASE
+    @Published var viewModel = FeatureViewModel(name: "", onUser: {})
+    @Published var headerConfiguration = FeatureHeaderConfiguration(title: "", descr: "")
+    #else
+    @Published var viewModel = FeatureViewModel(name: "mock name", onUser: {})
+    @Published var headerConfiguration = FeatureHeaderConfiguration(title: "header title", descr: "header descr")
+    #endif
+
+}
+```
+Requirements:
+- Data содержит модели для отображения
+
+## 4.2 View
+
+```swift
+struct FeatureView: View {
+
+    @ObservedObject
+    var data = FeatureData()
+
+    var body: some View {
+        VStack {    
+            Header(cfg: data.headerConfiguration)
+            Text(data.viewModel.name)
+                .onTapGesture {
+                    data.viewModel.onUser()
+                }
+        }
+    }
+}
+```
+
+Requirements:
+- View отображает состояние
+- View не содержит бизнес-логики
+- View не знает о Router
+- View не вызывает Interactor напрямую
+- View не создает зависимости
+
+# 5. Interactor Rule
+
+Этот объект отвечает за бизнес логику экрана
+
+## 5.1 Protocol
+
+```swift
+protocol FeatureBusinessLogic: AnyObject, Sendable {
+    func makeState(request: FeatureModel.Request) async
+}
+```
+
+## 5.2 Interactor Implementation Requirements
+
+```swift
+final class FeatureInteractor: FeatureBusinessLogic {
+
+	// тут могут добавиться сервисы для работы объекта
+
+    private let store: FeatureDataStore
+    private let presenter: FeaturePresentationLogic
+
+    init(
+        store: FeatureDataStore,
+        presenter: FeaturePresentationLogic
+    ) {
+        self.store = store
+        self.presenter = presenter
+    }
+
+    func makeState(request: FeatureModel.Request) async {
+        switch request {
+        case .start:
+            break
+        }
+    }
+}
+```
+
+Lint Requirements:
+- Обязательно Sendable
+- Только async API
+- Никаких ссылок на UIViewController
+- Только один публичный entry-point: makeState
+
+## 5.3 Implementation Constraints
+
+Interactor обязан:
+- Иметь presenter
+- Иметь dataStore
+- Никогда не обращаться к UI
+- Работать с данными только через actor Store
+
+# 6. DataStore Rule
+
+Этот объект нужен для потокобезопасной работы с данными внутри экрана (чтение и запись)
+
+## 6.1 Protocol
+
+```swift
+protocol FeatureDataStore: Actor { ... }
+```
+
+## 6.2 Implementation
+
+```swift
+final actor FeatureStore: FeatureDataStore { 
+	// данные которые храним + методы для их установки
+    
+    // пример
+    var cardNames: [String] = []
+
+    func set(cardNames: [String]) {
+        self.cardNames = cardNames
+    }
+}
+```
+
+Lint Requirements
+- Store всегда actor
+- Запрещено использовать class
+- Запрещены глобальные shared instances
+- Только Store хранит mutable state
+- Свойства не нужно помечать как private(set) vat, setter и так закрыт
+
+# 7. Presenter Rule
+
+Задача presenter получить на вход сырые данные и привести их к нормальному (читаемому) виду
+
+## 7.1 Protocol
+
+```swift
+protocol FeaturePresentationLogic: AnyObject, Sendable {
+    func buildState(response: FeatureModel.Response) async
+}
+```
+
+## 7.2 Implementation
+
+```swift
+final class FeaturePresenter: FeaturePresentationLogic {
+
+    nonisolated(unsafe)
+    private weak var controller: FeatureDisplayLogic?
+
+    init(controller: FeatureDisplayLogic) {
+        self.controller = controller
+    }
+
+    func buildState(response: FeatureModel.Response) async {
+        switch response {
+        // пример
+        case .setup(let data):
+            let viewModel = prepareViewModel(from: data)
+            await controller?.displayContent(.display(viewModel))
+        }
+    }
+}
+```
+
+## 7.3 Implementation Constraints
+
+- weak nonisolated(unsafe) ссылка на controller
+- Содержит инит через controller
+- Не хранит состояние
+- Не содержит бизнес-логики
+- Только преобразование Response → ViewModel которое включает форматирование данных
+- Для отображения ui изменений await controller?.display(.state)
+- Для навигации await controller?.requestRoute(.destination)
+- Для действий по кнопкам await controller?.perfromAction(.action)
+
+
+# 8. Router Rule
+
+Этот объект отвечает за навигацию и передачу данных между экранами, каждый метод навигации находится в отдельной функции.
+
+## 8.1 Protocol
+
+```swift
+@MainActor
+protocol FeatureRoutingLogic { ... }
+```
+
+## 8.2 Implementation
+
+```swift
+final class FeatureRouter: FeatureRoutingLogic {
+
+    private weak var controller: UIViewController?
+
+    private let store: FeatureDataStore
+    private let dependency: ModuleDependency
+
+    init(
+        store: FeatureDataStore,
+        controller: UIViewController,
+        dependency: ModuleDependency
+    ) {
+        self.store = store
+        self.controller = controller
+        self.dependency = dependency
+    }
+
+    // далее идут методы протокола
+    // методы помечаются async для удобной работы с объектом store
+
+    func routeToForward() async {
+        // пример
+        let featureData = await store.data
+        let nextFeature = NextFeatureFactory.configure(
+            with: dependency,
+            data: featureData
+        )
+        self.controller?.navigationController.push(nextFeature, animated: true)
+    }
+
+    func routeToBack() async {
+        self.controller?.navigationController.popViewController(animated: true)
+    }
+}
+```
+
+## 8.3 Constraints
+- Все методы routing должны быть async
+- Router получает FeatureDataStore
+- Router не содержит бизнес-логики
+- Минимум состояний для юая (бывают исключения, когда нужно прихранить контроллер)
+
+# 9. Models Rule
+
+```swift
+enum FeatureModel {
+    enum Request { }
+    enum Response { }
+    enum ViewModel { }
+    enum Route { }
+    enum Action { }
+}
+```
+
+Строгая типизация:
+
+- View → Action @Sendable closure
+- Controller → Interactor	Request
+- Interactor → Presenter	Response
+- Presenter → Controller	ViewModel
+- Controller → Router	Route
+- UI Events	→ Action
+
+❗ Никаких дополнительных flow enum вне FeatureModel
+
+# 10. Factory Rule
+
+Factory для сборки экрана обязателен.
+
+```swift
+@MainActor
+final class FeatureFactory {
+
+    static func configure(with dependency: ModuleDependency) -> UIViewController {
+        let view = FeatureView()
+        let controller = FeatureController(rootView: view)
+        let store = FeatureStore()
+        let presenter = FeaturePresenter(controller: controller)
+        // если требуется создание отдельных объектов для работы интерактора, пример
+        let service = FeatureService(network: dependency.network)
+        let interactor = FeatureInteractor(
+            service: service,
+            presenter: presenter,
+            store: store
+        )
+        let router = FeatureRouter(
+            controller: controller,
+            dataStore: store
+        )
+        controller.interactor = interactor
+        controller.router = router
+        return controller
+    }
+
+}
+```
+
+Требования:
+- Только Factory создает зависимости экрана
+- Store шарится между Interactor и Router
+- Controller не создает зависимости сам
+- Метод configure принимает на вход зависимость модуля (ModuleDependency)
+- Метод configure может принимать на вход еще аргументы, например делегаты или данные с предыдущего экрана
+
+Исключения:
+- В зависимости от контекста модуля, некоторые объекты могут быть уже созданы внутри общей зависимости (ModuleDependency), если такие есть, нужно уточнить стоит ли их использовать
+
+# 11. Concurrency Enforcement
+
+Обязательно:
+- Store = actor
+- BusinessLogic = Sendable
+- PresentationLogic = Sendable
+- UI методы = @MainActor
+- Routing = @MainActor и async
+- Никакого shared mutable state вне actor
+
+# 12. Запрещено (Lint Violations)
+- Бизнес-логика в Controller
+- Навигация из Controller
+- Состояние в Presenter
+- Использование Singleton
+- Синхронные cross-layer вызовы
+- Доступ к Store минуя actor boundary
+- Модели вне FeatureModel (исключение если есть общая модель на модуль)
+
+# 13. Cursor Enforcement Recommendation
+
+Cursor должен:
+- Предлагать scaffold строго по этому шаблону
+
+Предупреждать если: 
+- нет Sendable 
+- нет @MainActor 
+- нет Factory
+- Controller делает push/present
+- в любом из VIP компонентов есть прямые зависимости, которые создаются вместе с объектом
+
+@vip-template-sui

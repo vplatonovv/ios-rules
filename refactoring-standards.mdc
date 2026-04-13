@@ -1,0 +1,309 @@
+---
+description: "Refactoring and code quality standards for Clean Swift (Swift 6): dependency injection, no hardcode/magic values, concurrency safety, naming, state management, error handling, testability, and lint violations."
+globs: 
+- "**/*.swift"
+alwaysApply: false
+---
+
+# Clean Swift (Swift 6) — Refactoring & Code Quality Standards
+
+Данное правило определяет обязательные требования к:
+- рефакторингу
+- качеству архитектуры
+- чистоте кода
+- concurrency-безопасности
+- зависимости между компонентами
+
+Применяется ко всему production-коду.
+
+# 1. Dependency Injection (жёсткое правило)
+
+## 1.1 Запрещены прямые зависимости
+
+❌ Запрещено:
+
+```swift
+final class FeatureInteractor {
+    private let service = NetworkService()
+}
+```
+
+Любая зависимость должна:
+- передаваться через init
+- быть описана протоколом
+- быть подменяемой в тестах
+
+✔️ Правильно:
+
+```swift
+init(service: NetworkServiceProtocol)
+```
+
+## 1.2 Запрещены скрытые зависимости
+
+Нельзя:
+- использовать singleton
+- создавать сервис внутри метода
+- обращаться к глобальному shared объекту
+
+Если зависимость нельзя замокать → архитектура нарушена.
+
+# 2. Hardcode & Magic Values
+
+## 2.1 Запрещён хардкод
+
+❌ Нельзя:
+
+```swift
+fetch(limit: 20)
+```
+
+✔️ Нужно:
+
+```swift
+static let defaultLimit = 20
+```
+
+## 2.2 Строки
+
+Запрещены:
+- “магические” строки
+- inline ключи
+- inline идентификаторы
+- raw URL строки
+
+Все строки должны быть:
+- вынесены в static let
+- либо типизированы через enum
+
+## 2.3 UserDefaults
+
+❌ Запрещено:
+
+```swift
+UserDefaults.standard.string(forKey: "user_id")
+```
+
+✔️ Правильно:
+
+```swift
+enum UserDefaultsKeys {
+    static let userId = "user_id"
+}
+```
+
+Или типобезопасный wrapper.
+
+# 3. Control Flow Complexity
+
+## 3.1 Минимум if/else
+- Предпочитать guard
+- Использовать switch
+- Использовать полиморфизм вместо условий
+- Использовать early return
+
+❌ Плохо:
+
+```swift
+if condition {
+    if otherCondition {
+        ...
+    }
+}
+```
+
+✔️ Лучше:
+
+```swift
+guard condition else { return }
+guard otherCondition else { return }
+```
+
+## 3.2 Cyclomatic Complexity
+
+Функции должны быть:
+- простыми
+- читаемыми
+- с минимальным количеством ветвлений
+
+Если функция > 20-30 строк → требуется декомпозиция.
+
+# 4. Pure Functions
+
+## 4.1 Функции должны быть чистыми
+
+Функция считается чистой если:
+- Не изменяет внешнее состояние
+- Не зависит от глобального состояния
+- Возвращает предсказуемый результат
+- Не делает side-effects
+
+Особенно строго:
+- В Presenter
+- В Interactor (логика трансформации)
+
+# 5. Naming Rules (Swift API Guidelines)
+
+Имена должны:
+- быть выразительными
+- использовать verb-first стиль для методов
+- использовать существительные для типов
+- быть краткими, но понятными
+
+❌ Плохо:
+
+```swift
+func doStuff()
+func handle()
+func processData()
+```
+
+✔️ Правильно:
+
+```swift
+func fetchUserProfile()
+func buildViewModel(from response:)
+func makeState(request:)
+```
+
+# 6. UI Concurrency Enforcement
+
+## 6.1 Работа с UI строго из MainActor
+
+Обязательно:
+- UI методы помечены @MainActor
+- Либо используется:
+
+```swift
+await MainActor.run { }
+```
+
+❌ Запрещено:
+- Обновлять UI из background thread
+- Вызывать UIKit/SwiftUI методы без MainActor
+
+# 7. State Management
+
+## 7.1 Mutable State
+
+- Mutable state только внутри actor Store
+- Presenter не хранит состояние
+- Controller не хранит бизнес-state
+
+## 7.2 Immutability First
+
+- Предпочитать let
+- Минимизировать var
+- Модели должны быть immutable
+
+# 8. Error Handling
+
+- Нельзя игнорировать ошибки
+- Нельзя использовать try? без объяснения
+- Ошибки должны быть типизированы
+- Использовать domain-specific error enum
+
+# 9. Logging & Debug Code
+
+- Нельзя оставлять debug print/print
+- Нельзя оставлять commented-out code
+- Отдавать предпочтение логгеру
+
+# 10. Extensions
+
+- Extensions должны иметь узкую ответственность
+- Нельзя превращать extension в “dumping ground”
+- Private extension предпочтительнее
+
+# 11. File Size Rule
+
+Если файл:
+
+- 400–500 строк
+- содержит несколько логических областей
+
+→ требуется декомпозиция.
+
+# 12. Testability Rule
+
+Любой код должен быть:
+- легко тестируемым
+- зависимость инжектируемой
+- не привязанным к конкретной реализации
+
+Если код сложно тестировать → требуется рефакторинг.
+
+# 13. Concurrency Best Practices (дополнение)
+
+- Предпочитать structured concurrency
+- Избегать detached Task без необходимости
+- Не использовать shared mutable state
+- Избегать nonisolated(unsafe) кроме Presenter weak ссылки
+- Не использовать @unchecked Sendable без обоснования
+
+# 14. Clean Code Best Practices
+
+## 14.1 Single Responsibility
+
+Каждый тип должен иметь одну ответственность.
+
+## 14.2 Explicit over implicit
+
+- Явные зависимости
+- Явные async
+- Явные типы
+
+## 14.3 No Boolean Flags
+
+❌ Плохо:
+
+```swift
+func fetch(isSilent: Bool)
+```
+
+✔️ Лучше:
+
+```swift
+enum FetchMode { case silent, normal }
+```
+
+## 14.4 No Long Parameter Lists
+
+Больше 2 параметров → использовать struct.
+
+# 15. Запрещено (Lint Violations)
+
+- new Service() внутри класса
+- raw UserDefaults ключи
+- magic numbers
+- UI без MainActor
+- nested if > 2 уровня
+- shared mutable state вне actor
+- Singleton
+- force unwrap
+- ignore errors
+- concrete dependency вместо протокола
+
+# 16. Cursor Enforcement
+
+Cursor должен:
+- Предупреждать при обнаружении = SomeService()
+- Предупреждать при raw UserDefaults ключах
+- Предупреждать если UI метод без @MainActor
+- Предупреждать если enum case не покрыт
+- Предупреждать при magic numbers
+- Предупреждать при большом уровне вложенности
+- Предлагать инъекцию зависимостей
+
+# 17. Критерий “Хороший рефакторинг”
+
+Код считается качественным если:
+- Он тестируем
+- Он детерминирован
+- Он не содержит скрытых зависимостей
+- Он concurrency-safe
+- Он соответствует VIP flow
+- Он не содержит магии
+- Он читаем без комментариев
+
+@refactoring

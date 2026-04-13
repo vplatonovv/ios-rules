@@ -1,0 +1,298 @@
+---
+description: Unit testing conventions for Clean Swift (VIP) modules with Swift 6. Covers test structure, mocks, async testing, naming, and coverage rules for Controller, Interactor, Presenter, Router, and Store test cases.
+globs:
+  - "Tests/**/*TestCase.swift"
+  - "Tests/**/*Tests.swift"
+  - "Tests/**/*Test.swift"
+  - "**/Tests/**/*.swift"
+alwaysApply: false
+---
+
+# Clean Swift (Swift 6) — Unit Testing Rule
+
+Данное правило распространяется на экраны, реализованные в соответствии с:
+- clean-swift-swift6.mdc
+- clean-swift-swiftui-swift6.mdc
+
+Тестируются только экраны, строго соответствующие архитектурному шаблону:
+- Controller
+- Interactor
+- Presenter
+- Router
+- Store (actor)
+- Model
+- Factory
+
+# 1. Общие принципы тестирования
+
+## 1.1 Framework
+- Используется XCTest
+- Тесты могут и должны быть async
+- Используется await вместо expectation, если это возможно
+
+Пример:
+
+```swift
+func test_makeState_start_callsPresenter() async {
+    await sut.makeState(request: .start)
+}
+```
+
+## 1.2 Структура тестов
+
+Каждый тест строится по простой схеме:
+
+```
+Given (configuration)
+When (action)
+Then (assertion)
+```
+
+Обязательные элементы:
+- sut (System Under Test)
+- Явная конфигурация зависимостей
+- Проверка результата через assert
+
+# 2. Структура тестовых файлов
+
+## 2.1 Один тип — один TestCase файл
+
+| Сущность  | Имя файла |
+|-------|-----|
+| Interactor | FeatureInteractorTestCase.swift |
+| Presenter | FeaturePresenterTestCase.swift |
+| Controller | FeatureControllerTestCase.swift |
+| Router | FeatureRouterTestCase.swift |
+| Store | FeatureStoreTestCase.swift |
+
+❗ Один TestCase файл на одну сущность  
+❗ Нельзя тестировать несколько VIP-компонентов в одном файле  
+
+## 2.2 Naming Convention
+
+Имя класса теста строго:
+
+```swift
+final class FeaturePresenterTestCase: XCTestCase
+```
+
+Суффикс TestCase обязателен.
+
+# 3. Что тестируется в VIP цикле
+
+Тесты должны проверять:
+
+## 3.1 Вызовы по цепочке
+
+VIP-тесты сводятся к проверке:
+
+- Controller → Interactor
+- Interactor → Presenter
+- Presenter → Controller
+- Controller → Router
+
+> Важно! При тестироавнии цепочки проверяется корректность вызовов методов для формирования ui состояния. Если interactor при вызове загрузки данных или любой другой логики вызывает показ экрана загрузки, обязательно должен быть вызов скрытие экрана загрузки.
+
+```swift
+await presenter.buildState(response: .showLoader)
+let data = await service.getData()
+await presenter.buildState(response: .prepare(data))
+await presenter.buildState(response: .hideLoder) // !!!
+```
+
+Проверка выполняется через:
+- Mock-объекты
+- Bool-флаги вызова
+- Captured arguments
+
+## 3.2 Форматирование данных
+
+Обязательно проверяется:
+- Interactor получил данные от сервиса
+- Interactor сформировал корректный Response
+- Presenter сформировал корректный ViewModel
+- Controller получил правильный ViewModel
+
+# 4. Моки и зависимости
+
+## 4.1 Interactor зависимости
+
+Если в Interactor передаются:
+- Сервисы
+- Репозитории
+- Менеджеры
+- Любой другой объект инкапсулирующий какую то логику
+
+На них обязательно создаются моки.
+
+Пример:
+
+```swift
+final class ServiceMock: ServiceProtocol {
+
+    var fetchCalled = false
+	var stubData: Data! // конфигурируется из тест кейса
+    
+    func fetch() async -> Data {
+        fetchCalled = true
+        return stubData
+    }
+}
+```
+
+# 4.2 Store (actor)
+
+Store может быть:
+- реальным actor
+- либо тестовым actor
+
+Если требуется контроль состояния — создаётся TestStore.
+
+# 5. Архитектурная проверка тестируемости
+
+Если:
+- Невозможно подменить зависимость
+- Невозможно прокинуть mock
+- Невозможно изолировать поведение
+
+Это считается нарушением архитектурных правил.
+
+В этом случае необходимо сообщить о проблеме архитектуры и предложить:
+- Вынести зависимость в протокол
+- Инжектировать через init
+- Убрать hidden dependency
+- Удалить singleton
+
+# 6. Async тестирование
+
+Почти все методы в Swift 6 VIP:
+- async
+- используют actor
+
+Следовательно:
+- Тесты должны быть async
+- Используется await
+- Никаких sleep()
+- Минимизировать ожидания через expectation
+
+Пример:
+
+```swift
+func test_buildState_callsDisplay() async {
+    await sut.buildState(response: .start)
+    XCTAssertTrue(controllerMock.displayCalled)
+}
+```
+
+# 7. Покрытие кейсов
+
+Обязательно покрываются:
+- Все case в Request
+- Все case в Response
+- Все case в ViewModel
+- Все case в Route
+- Все case в Action
+
+❗ Нельзя тестировать только happy path  
+❗ Каждый switch-case должен иметь тест  
+
+# 8. Правила чистоты тестов
+
+Тесты должны:
+- Быть детерминированными
+- Не менять глобальное состояние
+- Не использовать shared state
+- Не зависеть от порядка выполнения
+- Не модифицировать Store между тестами
+
+Каждый тест:
+- Создаёт новый sut
+- Создаёт новые mocks
+- Не переиспользует состояние
+
+# 9. Controller тестирование
+
+Проверяется:
+- Controller вызывает interactor
+- Controller вызывает router
+- Controller корректно реагирует на ViewModel
+
+UI тестирование layout не входит в scope unit tests.
+
+# 10. Presenter тестирование
+
+Проверяется:
+- Правильное форматирование Response → ViewModel
+- Корректный вызов controller.displayContent
+- По возможности вызовы методов requestRoute и perfromAction, сделать можно через конкретную модель для ui компонента
+- Отсутствие бизнес-логики
+
+# 11. Interactor тестирование
+
+Проверяется:
+- Вызов сервисов
+- Формирование Response
+- Передача в Presenter
+- Работа с Store через actor
+
+# 12. Router тестирование (опционально)
+
+Проверяется:
+- Вызов navigation logic
+- Использование данных из Store
+- Async поведение
+
+# 13. Factory тестирование (опционально)
+
+Проверяется:
+- Все зависимости созданы
+- Store shared между Router и Interactor
+- Нет nil зависимостей
+
+# 14. Обязательная структура TestCase
+
+```swift
+final class FeatureInteractorTestCase: XCTestCase {
+
+    private var sut: FeatureInteractor!
+    private var presenterMock: PresenterMock!
+    private var store: FeatureStore!
+
+    override func setUp() throws {
+		try super.setUp()
+        presenterMock = PresenterMock()
+        store = FeatureStore()
+        sut = FeatureInteractor(
+            store: store,
+            presenter: presenterMock
+        )
+    }
+
+    override func tearDown() throws {
+		try super.tearDown()
+        sut = nil
+        presenterMock = nil
+        store = nil
+    }
+}
+```
+
+# 15. Запрещено (Lint Violations)
+- Тестирование нескольких сущностей в одном TestCase
+- Использование реальных сервисов
+- Использование singleton
+- Shared mutable state
+- Неполное покрытие enum case
+- Невозможность подменить зависимость
+- Sync тесты для async API
+
+# 16. Cursor Enforcement
+
+Cursor должен:
+- Предлагать mock для каждой зависимости если они еще не описаны
+- Предупреждать если Interactor использует concrete service
+- Предлагать async тест вместо expectation
+- Предупреждать если не покрыты все case enum
+- Предупреждать если отсутствует sut
+
+@clean-swift-unit-tests-swift6
